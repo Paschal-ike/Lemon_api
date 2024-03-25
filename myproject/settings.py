@@ -40,14 +40,23 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'myapp',
     'rest_framework',
+    'rest_framework.authtoken',
     'rest_framework_xml',
     'django_filters',
     'djoser',
 ]
 DJOSER = {
     'LOGIN_FIELD': 'email',
-    'USER_CREATE_PASSWORD_RETYPE':True
+    'USER_ID_FIELD': 'username',
+    'USER_CREATE_PASSWORD_RETYPE':True,
+    'USER': {
+        'CREATE_FIELDS': ['email', 'username', 'password'],  # Define fields required for user registration
+    }
 }
+
+AUTHENTICATION_BACKENDS = [
+    'django.contrib.auth.backends.ModelBackend',
+]
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -132,9 +141,9 @@ STATIC_URL = 'static/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 REST_FRAMEWORK = {
-    # 'DEFAULT_AUTHENTICATION_CLASSES':[
-    #     'rest_framework_simplejwt.authentication.JWTAuthenication',
-    # ],
+    'DEFAULT_AUTHENTICATION_CLASSES':[
+         'rest_framework.authentication.TokenAuthentication',
+     ],
     
     'DEFAULT_FILTER_CLASSES':[
         'rest_framework.filters.OrderingFilter',

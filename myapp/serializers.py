@@ -3,6 +3,10 @@ from .models import *
 from django.contrib.auth.models import User
 
 class UserSerializer(serializers.ModelSerializer):
+    groups = serializers.SerializerMethodField()
+
+    def get_groups(self, obj):
+        return obj.groups.values_list('name', flat=True)
     class Meta:
         model = User
         fields = ['id', 'username', 'email', 'groups']
@@ -20,7 +24,7 @@ class MenuItemSerializer(serializers.ModelSerializer):
 
 class CartSerializer(serializers.ModelSerializer):
     class Meta:
-        models = Cart
+        model = Cart
         fields = ['id', 'user', 'menuitem', 'quantity', 'unit_price', 'price']
 
 class OrderItemSerialzers(serializers.ModelSerializer):
