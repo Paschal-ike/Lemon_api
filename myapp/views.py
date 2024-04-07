@@ -26,13 +26,6 @@ class CustomThrottle(throttling.AnonRateThrottle):
 class CustomUserThrottle(throttling.UserRateThrottle):
      rate = '100/day'
 
-
-
-
-     
-
-
-
 @api_view(['POST', 'PUT', 'PATCH', 'DELETE'])
 @permission_classes([IsAdminUser])
 @throttle_classes([CustomThrottle, CustomUserThrottle])
@@ -68,100 +61,131 @@ def menu_items_view(request):
 @permission_classes([IsAuthenticated])
 @throttle_classes([CustomThrottle, CustomUserThrottle])
 def manage_menu_item(request, menu_item_id=None):
-    if menu_item_id is None:
-        # If menu_item_id is None, handle listing all menu items or creating a new menu item
-        if request.method == 'GET':
-            menu_items = MenuItem.objects.all()
-            serializer = MenuItemSerializer(menu_items, many=True)
+    if request.method == 'GET':
+        if menu_item_id is None:
+            # If menu_item_id is None, handle listing all menu items
+            queryset = MenuItem.objects.all()
+
+            # Filtering
+            category = request.query_params.get('category')
+            if category:
+                queryset = queryset.filter(category__title=category)
+
+            # Pagination
+            paginator = PageNumberPagination
+            paginator.page_size = 10
+            paginated_queryset = paginator.paginate_queryset(queryset, request)
+
+            # Sorting
+            sort_by = request.query_params.get('sort_by', 'title')
+            queryset = queryset.order_by(sort_by)
+
+            serializer = MenuItemSerializer(paginated_queryset, many=True)
+            return paginator.get_paginated_response(serializer.data)
+        else:
+            # If menu_item_id is provided, handle retrieving a specific menu item
+            try:
+                menu_item = MenuItem.objects.get(id=menu_item_id)
+            except MenuItem.DoesNotExist:
+                return Response({'message': 'Menu item does not exist.'}, status=status.HTTP_404_NOT_FOUND)
+            
+            serializer = MenuItemSerializer(menu_item)
             return Response(serializer.data, status=status.HTTP_200_OK)
-        elif request.method == 'POST':
-            # Handle creating a new menu item
+
+    elif menu_item_id is None:
+        # If menu_item_id is None, handle creating a new menu item
+        if request.method == 'POST':
             serializer = MenuItemSerializer(data=request.data)
             if serializer.is_valid():
                 serializer.save()
                 return Response(serializer.data, status=status.HTTP_201_CREATED)
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
     else:
-        # If menu_item_id is provided, handle operations on a specific menu item
+        # If menu_item_id is provided, handle updating or deleting a specific menu item
         try:
             menu_item = MenuItem.objects.get(id=menu_item_id)
         except MenuItem.DoesNotExist:
             return Response({'message': 'Menu item does not exist.'}, status=status.HTTP_404_NOT_FOUND)
         
-        if request.method == 'GET':
-            serializer = MenuItemSerializer(menu_item)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        elif request.method in ['PUT', 'PATCH', 'DELETE']:
-            if request.user.is_staff:  # Only managers can update and delete menu items
-                if request.method == 'PUT':
-                    serializer = MenuItemSerializer(menu_item, data=request.data)
-                elif request.method == 'PATCH':
-                    serializer = MenuItemSerializer(menu_item, data=request.data, partial=True)
-                else:  # DELETE method
-                    menu_item.delete()
-                    return Response({'message': 'Menu item deleted successfully.'}, status=status.HTTP_204_NO_CONTENT)
-                
-                if serializer.is_valid():
-                    serializer.save()
-                    return Response(serializer.data, status=status.HTTP_200_OK)
-                return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-            else:
-                return Response({'message': 'You do not have permission to perform this action.'}, status=status.HTTP_403_FORBIDDEN)
+        if request.user.is_staff:  # Only managers can update and delete menu items
+            if request.method == 'PUT':
+                serializer = MenuItemSerializer(menu_item, data=request.data)
+            elif request.method == 'PATCH':
+                serializer = MenuItemSerializer(menu_item, data=request.data, partial=True)
+            else:  # DELETE method
+                menu_item.delete()
+                return Response({'message': 'Menu item deleted successfully.'}, status=status.HTTP_204_NO_CONTENT)
+            
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data, status=status.HTTP_200_OK)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            return Response({'message': 'You do not have permission to perform this action.'}, status=status.HTTP_403_FORBIDDEN)
 
-
-
-
-@api_view(['GET'])
+@api_view(['GET', 'POST', 'PUT', 'DELETE'])
 @permission_classes([IsAuthenticated])
-def get_menu_items(request):
-     queryset = MenuItem.objects.all()
-     
-     #filtering
-     category = request.query_params.get('category')
-     if category:
-          queryset = queryset.filter(category__title=category)
-          
-     #pagiantion
-     paginator = PageNumberPagination
-     paginator.page_size = 10
-     paginated_queryset = paginator.paginate_queryset(queryset, request)
-     
-     #sorting
-     sort_by = request.query_params.get('sort_by', 'title')
-     queryset = queryset.order_by(sort_by)
-     
-     serializer = MenuItemSerializer(paginated_queryset, many=True)
-     return paginator.get_paginated_response(serializer.data)
+def categories_view(request, pk=None):
+    if request.method == 'GET':
+        if pk is not None:
+            try:
+                category = Category.objects.get(pk=pk)
+                serializer = CategorySerializer(category)
+                return Response(serializer.data)
+            except Category.DoesNotExist:
+                return Response({'error': 'Category not found'}, status=status.HTTP_404_NOT_FOUND)
+        else:
+            queryset = Category.objects.all()
+            serializer = CategorySerializer(queryset, many=True)
+            return Response(serializer.data)
 
-@api_view(['GET'])
-@permission_classes([IsAuthenticated, IsDeliveryCrewUser])
-def view_assigned_orders(request):
-    # Retrieve orders assigned to the authenticated delivery crew user
-    assigned_orders = Order.objects.filter(delivery_crew=request.user)
+    elif request.method == 'POST':
+        if request.user.is_staff:  # Check if the user is admin
+            serializer = CategorySerializer(data=request.data)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data, status=status.HTTP_201_CREATED)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            return Response({"error": "You do not have permission to perform this action."}, status=status.HTTP_403_FORBIDDEN)
 
-    # Apply filtering
-    filter_backends = [OrderingFilter, SearchFilter]
-    ordering_fields = ['created_at', 'total_amount']  # Define fields for sorting
-    search_fields = ['id', 'status', 'customer_name']  # Define fields for searching
-    for backend in filter_backends:
-        assigned_orders = backend().filter_queryset(request, assigned_orders, view=view_assigned_orders)
-    
-    # Apply sorting
-    assigned_orders = OrderingFilter().filter_queryset(request, assigned_orders, view=view_assigned_orders)
-    
-    # Paginate the queryset
-    paginator = PageNumberPagination()
-    paginated_orders = paginator.paginate_queryset(assigned_orders, request)
+    elif request.method == 'PUT':
+        if not pk:
+            return Response({'error': 'Category ID is required for updating'}, status=status.HTTP_400_BAD_REQUEST)
 
-    # Serialize the paginated queryset
-    serializer = OrderSerializer(paginated_orders, many=True)
+        try:
+            category = Category.objects.get(pk=pk)
+        except Category.DoesNotExist:
+            return Response({'error': 'Category not found'}, status=status.HTTP_404_NOT_FOUND)
 
-    # Return paginated and serialized data
-    return paginator.get_paginated_response(serializer.data)
+        if request.user.is_staff:
+            serializer = CategorySerializer(category, data=request.data)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            return Response({"error": "You do not have permission to perform this action."}, status=status.HTTP_403_FORBIDDEN)
 
-@api_view(['GET', 'POST'])
+    elif request.method == 'DELETE':
+        if not pk:
+            return Response({'error': 'Category ID is required for deletion'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            category = Category.objects.get(pk=pk)
+        except Category.DoesNotExist:
+            return Response({'error': 'Category not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        if request.user.is_staff:
+            category.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        else:
+            return Response({"error": "You do not have permission to perform this action."}, status=status.HTTP_403_FORBIDDEN)
+
+@api_view(['GET', 'POST', 'DELETE'])
 @permission_classes([IsAdminUser])
-def manage_manager(request):
+def manage_manager(request, user_id=None):
     if request.method == 'GET':
         # Handle GET request to list managers
         managers = User.objects.filter(groups__name='Manager')
@@ -199,62 +223,85 @@ def manage_manager(request):
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-@api_view(['DELETE'])
-@permission_classes([IsAdminUser])
-def remove_manager(request, user_id):
-     try:
-          user = User.objects.get(id=user_id)
-          manager_group = Group.objects.get(name="Manager")
-          user.groups.remove(manager_group)
-          return Response(status=status.HTTP_200_OK)
-     except User.DoesNotExist:
-          return Response({"Error":"User not found"},status=status.HTTP_404_NOT_FOUND)
-     except Group.DoesNotExist:
-          return Response({"error":"Group not found"}, status=status.HTTP_404_NOT_FOUND)
-     
+    elif request.method == 'DELETE':
+        # Handle DELETE request to remove a manager
+        if user_id is None:
+            return Response({"error": "User ID is required to delete a manager."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            user = User.objects.get(id=user_id)
+            manager_group = Group.objects.get(name="Manager")
+            user.groups.remove(manager_group)
+            return Response({"success": "Manager removed successfully."}, status=status.HTTP_200_OK)
+        except User.DoesNotExist:
+            return Response({"error": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+        except Group.DoesNotExist:
+            return Response({"error": "Group not found."}, status=status.HTTP_404_NOT_FOUND)
+
+
+
 @api_view(['GET'])
-@permission_classes([IsAdminUser])
-def list_delivery_crew(request):
-    delivery_crew = User.objects.filter(groups__name='Delivery Crew')
-    serializer = UserSerializer(delivery_crew, many=True)
-    return Response(serializer.data, status=status.HTTP_200_OK)
+@permission_classes([IsAuthenticated, IsDeliveryCrewUser])
+def view_assigned_orders(request):
+    # Retrieve orders assigned to the authenticated delivery crew user
+    assigned_orders = Order.objects.filter(delivery_crew=request.user)
 
-@api_view(['POST'])
-@permission_classes([IsAdminUser])
-def assign_delivery_crew(request):
-    try:
-        user_id = request.data.get('user_id')
-        user = User.objects.get(id=user_id)
-        delivery_crew_group = Group.objects.get(name='Delivery Crew')
-        user.groups.add(delivery_crew_group)
-        return Response(status=status.HTTP_201_CREATED)
-    except User.DoesNotExist:
-        return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
-    except Group.DoesNotExist:
-        return Response({'error': 'Delivery Crew group not found'}, status=status.HTTP_404_NOT_FOUND)
+    # Apply filtering
+    filter_backends = [OrderingFilter, SearchFilter]
+    ordering_fields = ['created_at', 'total_amount']  # Define fields for sorting
+    search_fields = ['id', 'status', 'customer_name']  # Define fields for searching
+    for backend in filter_backends:
+        assigned_orders = backend().filter_queryset(request, assigned_orders, view=view_assigned_orders)
+    
+    # Apply sorting
+    assigned_orders = OrderingFilter().filter_queryset(request, assigned_orders, view=view_assigned_orders)
+    
+    # Paginate the queryset
+    paginator = PageNumberPagination()
+    paginated_orders = paginator.paginate_queryset(assigned_orders, request)
 
-@api_view(['DELETE'])
-@permission_classes([IsAdminUser])
-def remove_delivery_crew(request, userId):
-    try:
-        user = User.objects.get(id=userId)
-        delivery_crew_group = Group.objects.get(name='Delivery Crew')
-        user.groups.remove(delivery_crew_group)
-        return Response(status=status.HTTP_200_OK)
-    except User.DoesNotExist:
-        return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
-    except Group.DoesNotExist:
-        return Response({'error': 'Delivery Crew group not found'}, status=status.HTTP_404_NOT_FOUND)
-           
-@api_view(['GET'])
-@permission_classes(IsAuthenticated) 
-def get_cart_items(request):
-     user = request.user
-     cart_items = Cart.objects.filter(user=user)
-     serializer = CartSerializer(cart_items, many=True)
-     return Response(serializer.data, status=status.HTTP_200_OK)
+    # Serialize the paginated queryset
+    serializer = OrderSerializer(paginated_orders, many=True)
 
-@api_view(['GET', 'POST'])
+    # Return paginated and serialized data
+    return paginator.get_paginated_response(serializer.data)
+
+
+@api_view(['GET', 'POST', 'DELETE'])
+@permission_classes([IsAdminUser])
+def manage_delivery_crew(request, user_id=None):
+    if request.method == 'GET':
+        # List all delivery crew
+        delivery_crew = User.objects.filter(groups__name='Delivery Crew')
+        serializer = UserSerializer(delivery_crew, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    elif request.method == 'POST':
+        # Assign delivery crew
+        try:
+            user_id = request.data.get('user_id')
+            user = User.objects.get(id=user_id)
+            delivery_crew_group = Group.objects.get(name='Delivery Crew')
+            user.groups.add(delivery_crew_group)
+            return Response(status=status.HTTP_201_CREATED)
+        except User.DoesNotExist:
+            return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+        except Group.DoesNotExist:
+            return Response({'error': 'Delivery Crew group not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    elif request.method == 'DELETE':
+        # Remove delivery crew
+        try:
+            user = User.objects.get(id=user_id)
+            delivery_crew_group = Group.objects.get(name='Delivery Crew')
+            user.groups.remove(delivery_crew_group)
+            return Response(status=status.HTTP_200_OK)
+        except User.DoesNotExist:
+            return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+        except Group.DoesNotExist:
+            return Response({'error': 'Delivery Crew group not found'}, status=status.HTTP_404_NOT_FOUND)
+         
+@api_view(['GET', 'POST', 'DELETE'])
 @permission_classes([IsAuthenticated])
 def manage_cart(request):
     if request.method == 'GET':
@@ -314,13 +361,15 @@ def manage_cart(request):
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-@api_view(['DELETE'])
-@permission_classes([IsAuthenticated])
-def clear_cart(request):
-     user = request.user
-     cart_items = Cart.objects.filter(user=user)
-     cart_items.delete()
-     return Response(status=status.HTTP_204_NO_CONTENT)
+    elif request.method == 'DELETE':
+        try:
+            user = request.user
+            cart_items = Cart.objects.filter(user=user)
+            cart_items.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
  
 @api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated])
@@ -405,27 +454,7 @@ def view_assigned_orders(request):
 
     # Return paginated and serialized data
     return paginator.get_paginated_response(serializer.data)
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-def create_order(request):
-     try:
-          user = request.user
-          new_order = Order.objects.create(user=user)   #create a new order  
-          #Get current cart Item and create order item
-          cart_items = Cart.objects.filter(user=user) 
-          for item in cart_items:
-               OrderItem.objects.create(
-                    order=new_order,
-                    menuitem = item.menuitem,
-                    quantity= item.quantity,
-                    unit_price =item.unit_price
-               )  
-          cart_items.delete() #Clear Cart
-          serializer = OrderSerializer(new_order)
-          return Response(serializer.data, status=status.HTTP_201_CREATED)
-     except Exception as e:
-          return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
-          
+         
 @api_view(['GET', 'PATCH'])
 @permission_classes([IsAuthenticated])
 def manage_order_items(request, order_id):
@@ -475,99 +504,96 @@ def manage_order_items(request, order_id):
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-
-
-@api_view(['GET', 'POST'])
+@api_view(['POST'])
 @permission_classes([IsAuthenticated])
-def categories_view(request):
+def create_order(request):
+    try:
+        user = request.user
+        
+        # Create a new order
+        new_order = Order.objects.create(user=user)
+        
+        # Retrieve current cart items for the user
+        cart_items = Cart.objects.filter(user=user)
+        
+        # Create order items from cart items
+        for item in cart_items:
+            OrderItem.objects.create(
+                order=new_order,
+                menuitem=item.menuitem,
+                quantity=item.quantity,
+                unit_price=item.unit_price
+            )
+        
+        # Clear the cart after creating order items
+        cart_items.delete()
+        
+        # Serialize the created order
+        serializer = OrderSerializer(new_order)
+        
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['GET', 'POST', 'PUT', 'PATCH', 'DELETE'])
+@permission_classes([IsAuthenticated])
+def order(request, order_id=None):
     if request.method == 'GET':
-        queryset = Category.objects.all()
-        serializer = CategorySerializer(queryset, many=True)
-        return Response(serializer.data)
+        # Retrieve a list of orders for the authenticated user
+        if order_id is None:
+            orders = Order.objects.filter(user=request.user)
+            serializer = OrderSerializer(orders, many=True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        # Retrieve details of a specific order
+        else:
+            try:
+                order = Order.objects.get(id=order_id)
+                if order.user == request.user:
+                    serializer = OrderSerializer(order)
+                    return Response(serializer.data, status=status.HTTP_200_OK)
+                else:
+                    return Response({'error': 'You do not have permission to view this order.'}, status=status.HTTP_403_FORBIDDEN)
+            except Order.DoesNotExist:
+                return Response({'error': 'Order not found.'}, status=status.HTTP_404_NOT_FOUND)
+    
     elif request.method == 'POST':
-        if request.user.is_staff:  # Check if the user is admin
-            serializer = CategorySerializer(data=request.data)
+        # Create a new order
+        serializer = OrderSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save(user=request.user)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    elif request.method in ['PUT', 'PATCH', 'DELETE']:
+        # Retrieve the order object
+        try:
+            order = Order.objects.get(id=order_id)
+        except Order.DoesNotExist:
+            return Response({'error': 'Order not found.'}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Check if the user has permission to modify/delete the order
+        if order.user != request.user:
+            return Response({'error': 'You do not have permission to modify/delete this order.'}, status=status.HTTP_403_FORBIDDEN)
+        
+        # Update the order (PUT)
+        if request.method == 'PUT':
+            serializer = OrderSerializer(order, data=request.data)
             if serializer.is_valid():
                 serializer.save()
-                return Response(serializer.data, status=201)
+                return Response(serializer.data, status=status.HTTP_200_OK)
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        else:
-            return Response({"error": "You do not have permission to perform this action."}, status=status.HTTP_403_FORBIDDEN)
-
-@api_view(['GET', 'PUT', 'DELETE'])
-@permission_classes([IsAdminUser])
-def categories_detail_view(request, pk):
-    try:
-        category = Category.objects.get(pk=pk)
-    except Category.DoesNotExist:
-        return Response(status=status.HTTP_404_NOT_FOUND)
-
-    if request.method == 'GET':
-        serializer = CategorySerializer(category)
-        return Response(serializer.data)
-    elif request.method == 'PUT':
-        serializer = CategorySerializer(category, data=request.data)
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    elif request.method == 'DELETE':
-        category.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        
+        # Update the status of the order (PATCH)
+        elif request.method == 'PATCH':
+            order.status = request.data.get('status')
+            order.save()
+            return Response({'message': 'Order status updated successfully.'}, status=status.HTTP_200_OK)
+        
+        # Delete the order (DELETE)
+        elif request.method == 'DELETE':
+            order.delete()
+            return Response({'message': 'Order deleted successfully.'}, status=status.HTTP_204_NO_CONTENT)
 
 
-@api_view(['GET', 'POST'])
-@permission_classes([IsAuthenticated])
-def order_list(request):
-     if request.method == 'GET':
-          orders = Order.objects.filter(user=request.user)
-          serializer = OrderSerializer(orders, many=True)
-          return Response(serializer.data, status=status.HTTP_200_OK)
-     
-     elif request.method == 'POST':
-          serializer = OrderSerializer(data=request.data)
-          if serializer.is_valid():
-               serializer.save(user=request.user)
-               return Response(serializer.data, status=status.HTTP_201_CREATED)
-          return Response(serializer.data, status=status.HTTP_400_BAD_REQUEST)
-     
-@api_view(['GET', 'PUT', 'PATCH', 'DELETE'])
-@permission_classes([IsAuthenticated])
-def order_detail(request, orderId):
-     try:
-          order = Order.objects.get(id=orderId)
-     except Order.DoesNotExist:
-          return Response(status=status.HTTP_404_NOT_FOUND)
-     
-     if request.method == "GET":
-          if order.user == request.user:
-               serializer = OrderSerializer(order)
-               return Response(serializer.data, status=status.HTTP_200_OK)
-          else:
-               return Response(status=status.HTTP_403_FORBIDDEN)
-          
-     elif request.method == "PUT":
-          if order.user == request.user:
-               serializer = OrderSerializer(order, data=request.data)
-               if serializer.is_valid():
-                    serializer.save()
-                    return Response(serializer.data, status=status.HTTP_200_OK)
-               return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-          else:
-               return Response(status=status.HTTP_403_FORBIDDEN)
-     
-     elif request.method == "PATCH":
-          if order.user == request.user:
-               order.status = request.data.get('status')
-               order.save()
-               return Response(status=status.HTTP_200_OK) 
-          else:
-               return Response(status=status.HTTP_403_FORBIDDEN)
-     
-               
-     elif request.method == "DELETE":
-          if order.user == request.user:
-               order.delete()
-               return Response(status=status.HTTP_204_NO_CONTENT)
-          else:
-               return Response(status=status.HTTP_403_FORBIDDEN)
+
